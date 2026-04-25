@@ -2,6 +2,101 @@ const path = require('path');
 const fs = require('fs');
 const fsp = require('fs').promises;
 const moment = require('moment');
+const csv = require('fast-csv');
+const archiver = require('archiver');
+
+function formatDateForCsv(value) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+
+  return `${day}/${month}/${year}`;
+}
+
+function isDateLikeString(value) {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  return (
+    /^\d{4}-\d{2}-\d{2}T/.test(value) ||
+    /^[A-Z][a-z]{2} [A-Z][a-z]{2} \d{2} \d{4}/.test(value)
+  );
+}
+
+function normalizeCsvRow(rawRow) {
+  const row = { ...(rawRow || {}) };
+
+  for (const key of Object.keys(row)) {
+    if (Array.isArray(row[key])) {
+      row[key] = row[key].join(',');
+    }
+
+    if (row[key] instanceof Date || isDateLikeString(row[key])) {
+      row[key] = formatDateForCsv(row[key]);
+    }
+
+    if (key === '_id' && row[key] && typeof row[key] === 'object') {
+      row[key] = String(row[key]);
+    }
+  }
+
+  return row;
+}
+
+async function writeCsv(filePath, rows, headerOrder = null) {
+  return new Promise((resolve, reject) => {
+    const ws = fs.createWriteStream(filePath);
+
+    // UTF-8 BOM for Hebrew in Excel on Windows
+    ws.write('\uFEFF', 'utf8');
+
+    let headers = headerOrder;
+
+    if (!headers && rows && rows.length > 0) {
+      headers = Object.keys(rows[0]);
+    }
+
+    const csvStream = csv.format({ headers: headers || true });
+
+    ws.on('finish', resolve);
+    ws.on('error', reject);
+    csvStream.on('error', reject);
+
+    csvStream.pipe(ws);
+
+    for (const rawRow of rows || []) {
+      csvStream.write(normalizeCsvRow(rawRow));
+    }
+
+    csvStream.end();
+  });
+}
+
+async function zipFiles(zipPath, files) {
+  return new Promise((resolve, reject) => {
+    const output = fs.createWriteStream(zipPath);
+    const archive = archiver('zip', { zlib: { level: 6 } });
+
+    output.on('close', resolve);
+    output.on('error', reject);
+    archive.on('error', reject);
+
+    archive.pipe(output);
+
+    for (const file of files) {
+      archive.file(file.path, { name: file.name });
+    }
+
+    archive.finalize();
+  });
+}
 
 async function cleanupFiles(paths) {
   await Promise.all(
@@ -13,7 +108,6 @@ async function runBackup({
   config,
   getModel,
   uploader,
-  backupUtils,
   tmpDir
 }) {
   const ts = moment().format('YYYY-MM-DD_HH-mm-ss');
@@ -43,7 +137,7 @@ async function runBackup({
         const csvFilename = `${dataset.key}-${ts}.csv`;
         const csvPath = path.join(tmpDir, csvFilename);
 
-        await backupUtils.writeCsv(csvPath, dataset.rows, dataset.headers);
+        await writeCsv(csvPath, dataset.rows, dataset.headers);
 
         return {
           path: csvPath,
@@ -52,7 +146,7 @@ async function runBackup({
       })
     );
 
-    await backupUtils.zipFiles(zipPath, createdCsvFiles);
+    await zipFiles(zipPath, createdCsvFiles);
 
     const uploadRes = await uploader(zipPath, folderId);
 
@@ -70,9 +164,11 @@ async function runBackup({
     };
   } catch (error) {
     const cleanupPaths = createdCsvFiles.map(f => f.path);
+
     if (fs.existsSync(zipPath)) {
       cleanupPaths.push(zipPath);
     }
+
     await cleanupFiles(cleanupPaths);
     throw error;
   }
