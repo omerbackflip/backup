@@ -35,7 +35,18 @@ function normalizeCsvRow(rawRow) {
 
   for (const key of Object.keys(row)) {
     if (Array.isArray(row[key])) {
-      row[key] = row[key].join(',');
+      row[key] = row[key].some(item => item && typeof item === 'object')
+        ? JSON.stringify(row[key])
+        : row[key].join(',');
+    }
+
+    if (
+      row[key] &&
+      typeof row[key] === 'object' &&
+      !(row[key] instanceof Date) &&
+      key !== '_id'
+    ) {
+      row[key] = JSON.stringify(row[key]);
     }
 
     if (row[key] instanceof Date || isDateLikeString(row[key])) {
@@ -50,6 +61,22 @@ function normalizeCsvRow(rawRow) {
   return row;
 }
 
+function getHeadersFromAllRows(rows) {
+  const headers = [];
+  const seen = new Set();
+
+  for (const row of rows || []) {
+    for (const key of Object.keys(row || {})) {
+      if (!seen.has(key)) {
+        seen.add(key);
+        headers.push(key);
+      }
+    }
+  }
+
+  return headers;
+}
+
 async function writeCsv(filePath, rows, headerOrder = null) {
   return new Promise((resolve, reject) => {
     const ws = fs.createWriteStream(filePath);
@@ -60,7 +87,7 @@ async function writeCsv(filePath, rows, headerOrder = null) {
     let headers = headerOrder;
 
     if (!headers && rows && rows.length > 0) {
-      headers = Object.keys(rows[0]);
+      headers = getHeadersFromAllRows(rows);
     }
 
     const csvStream = csv.format({ headers: headers || true });

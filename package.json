@@ -1,5 +1,8 @@
 {
   "name": "backup",
   "version": "1.0.0",
-  "main": "backend/index.js"
+  "main": "backend/index.js",
+  "dependencies": {
+    "unzipper": "^0.12.3"
+  }
 }
