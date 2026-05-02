@@ -81,43 +81,50 @@ async function runRestore({
 }) {
   const extractDir = path.join(tmpDir, `restore_${Date.now()}`);
 
-  await extractZip(zipPath, extractDir);
+  await fsp.mkdir(extractDir, { recursive: true });
 
-  const files = await fsp.readdir(extractDir);
+  try {
+    await extractZip(zipPath, extractDir);
 
-  const results = [];
+    const files = await fsp.readdir(extractDir);
+    const results = [];
 
-  for (const modelConfig of config.models) {
-    const file = files.find(f => f === modelConfig.archiveName);
+    for (const modelConfig of config.models) {
+      const file = files.find(f => f === modelConfig.archiveName);
 
-    if (!file) {
+      if (!file) {
+        results.push({
+          model: modelConfig.modelName,
+          status: 'missing'
+        });
+        continue;
+      }
+
+      const filePath = path.join(extractDir, file);
+      const rows = await parseCsv(filePath);
+      const Model = getModel(modelConfig.modelName);
+
+      const docs = rows.map(reviveTypes);
+
+      await Model.deleteMany({});
+      await Model.insertMany(docs, { ordered: false });
+
       results.push({
         model: modelConfig.modelName,
-        status: 'missing'
+        inserted: docs.length,
+        status: 'restored'
       });
-      continue;
     }
 
-    const filePath = path.join(extractDir, file);
-    const rows = await parseCsv(filePath);
-    const Model = getModel(modelConfig.modelName);
+    return {
+      success: true,
+      results
+    };
 
-    const docs = rows.map(reviveTypes);
-
-    await Model.deleteMany({});
-    await Model.insertMany(docs, { ordered: false });
-
-    results.push({
-      model: modelConfig.modelName,
-      inserted: docs.length,
-      status: 'restored'
-    });
+  } finally {
+    // ALWAYS cleanup
+    await fsp.rm(extractDir, { recursive: true, force: true });
   }
-
-  return {
-    success: true,
-    results
-  };
 }
 
 module.exports = {
