@@ -61,11 +61,11 @@ function reviveTypes(row) {
       continue;
     }
 
-    // number
-    if (!isNaN(value) && value.trim() !== '') {
-      result[key] = Number(value);
-      continue;
-    }
+    // // number was commented out because it can cause issues with leading zeros and non-numeric strings
+    // if (!isNaN(value) && value.trim() !== '') {
+    //   result[key] = Number(value);
+    //   continue;
+    // }
 
     result[key] = value;
   }
