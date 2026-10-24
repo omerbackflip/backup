@@ -27,11 +27,18 @@ function parseCsv(filePath) {
   });
 }
 
-function reviveTypes(row) {
+function reviveTypes(row, Model) {
   const result = {};
 
   for (const key of Object.keys(row)) {
     let value = row[key];
+
+    // Preserve declared strings exactly, including passwords and file IDs.
+    const schemaField = Model.schema.path(key);
+    if (schemaField && schemaField.instance === 'String') {
+      result[key] = value;
+      continue;
+    }
 
     if (value === '') {
     //   result[key] = null;
@@ -104,7 +111,7 @@ async function runRestore({
       const rows = await parseCsv(filePath);
       const Model = getModel(modelConfig.modelName);
 
-      const docs = rows.map(reviveTypes);
+      const docs = rows.map(row => reviveTypes(row, Model));
 
       await Model.deleteMany({});
       await Model.insertMany(docs, { ordered: false });
